@@ -1,0 +1,94 @@
+name: Package Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 21
+      uses: actions/setup-java@v4
+      with:
+        java-version: '21'
+        distribution: 'temurin'
+        cache: 'gradle'
+
+    - name: Build distribution with Gradle
+      run: .\gradlew.bat installDist
+
+    - name: Write launcher source code
+      shell: pwsh
+      run: |
+        $code = @'
+        #include <windows.h>
+        #include <stdio.h>
+        #include <stdlib.h>
+
+        int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+            char javaHome[MAX_PATH];
+            char javaExe[MAX_PATH];
+            DWORD size = GetEnvironmentVariableA("JAVA_HOME", javaHome, MAX_PATH);
+            if (size > 0 && size < MAX_PATH) {
+                snprintf(javaExe, sizeof(javaExe), "\"%s\\bin\\javaw.exe\"", javaHome);
+                DWORD attrib = GetFileAttributesA(javaExe + 1);
+                if (attrib == INVALID_FILE_ATTRIBUTES) {
+                    snprintf(javaExe, sizeof(javaExe), "javaw");
+                }
+            } else {
+                snprintf(javaExe, sizeof(javaExe), "javaw");
+            }
+
+            char cmd[8192];
+            snprintf(cmd, sizeof(cmd), "%s -cp \"lib/*\" com.minecraftai.Game", javaExe);
+
+            STARTUPINFOA si;
+            PROCESS_INFORMATION pi;
+            ZeroMemory(&si, sizeof(si));
+            si.cb = sizeof(si);
+            ZeroMemory(&pi, sizeof(pi));
+
+            if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+                if (size > 0 && size < MAX_PATH) {
+                    snprintf(javaExe, sizeof(javaExe), "\"%s\\bin\\java.exe\"", javaHome);
+                } else {
+                    snprintf(javaExe, sizeof(javaExe), "java");
+                }
+                snprintf(cmd, sizeof(cmd), "%s -cp \"lib/*\" com.minecraftai.Game", javaExe);
+                if (!CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+                    MessageBoxA(NULL, "Failed to launch Java. Please make sure Java 21 or newer is installed and in your PATH.", "Launch Error", MB_OK | MB_ICONERROR);
+                    return 1;
+                }
+            }
+
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            return 0;
+        }
+        '@
+        Set-Content -Path launcher.c -Value $code -Encoding utf8
+
+    - name: Add MinGW to PATH
+      shell: pwsh
+      run: echo "C:\msys64\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Compile Launcher EXE
+      run: gcc launcher.c -o build/install/MinecraftAi/MinecraftAi.exe -mwindows
+
+    - name: Create Release ZIP
+      shell: pwsh
+      run: |
+        Compress-Archive -Path build/install/MinecraftAi -DestinationPath build/MinecraftAi-Release.zip
+
+    - name: Upload Release ZIP Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: MinecraftAi-Release
+        path: build/MinecraftAi-Release.zip

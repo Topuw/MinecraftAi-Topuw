@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "KKK",
+    "KKK",
+    "KKK"
+  ],
+  "key": {
+    "K": {
+      "item": "minecraft:kebab"
+    }
+  },
+  "result": {
+    "item": "minecraft:kebab_block",
+    "count": 1
+  }
+}
